@@ -261,6 +261,7 @@ protected:
   Int       m_PCMBitDepth[MAX_NUM_CHANNEL_TYPE];
   UInt      m_pcmLog2MaxSize;
   UInt      m_uiPCMLog2MinSize;
+  Bool      m_useMatchingPursuit;
   //====== Slice ========
   SliceConstraint m_sliceMode;
   Int       m_sliceArgument;
@@ -664,6 +665,8 @@ public:
   Bool      getUsePCM                       ()      { return m_usePCM;                 }
   UInt      getPCMLog2MaxSize               ()      { return m_pcmLog2MaxSize;  }
   UInt      getPCMLog2MinSize               ()      { return  m_uiPCMLog2MinSize;  }
+  Void      setUseMatchingPursuit           (Bool b){ m_useMatchingPursuit = b; }
+  Bool      getUseMatchingPursuit           ()      { return m_useMatchingPursuit; }
 
   Bool      getCrossComponentPredictionEnabledFlag     ()                const { return m_crossComponentPredictionEnabledFlag;   }
   Void      setCrossComponentPredictionEnabledFlag     (const Bool value)      { m_crossComponentPredictionEnabledFlag = value;  }

@@ -77,6 +77,7 @@ private:
   TComYuv**               m_ppcResiYuvTemp; ///< Temporary Residual Yuv for each depth
   TComYuv**               m_ppcRecoYuvTemp; ///< Temporary Reconstruction Yuv for each depth
   TComYuv**               m_ppcOrigYuv;     ///< Original Yuv for each depth
+  Pel**                   m_ppcMPMask;      ///< Mask for matching pursuit
 
   //  Data : encoder control
   Bool                    m_bEncodeDQP;

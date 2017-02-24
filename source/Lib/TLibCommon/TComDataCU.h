@@ -109,6 +109,7 @@ private:
 #endif
 
   Pel*          m_pcIPCMSample[MAX_NUM_COMPONENT];      ///< PCM sample buffer (0->Y, 1->Cb, 2->Cr)
+  Pel*          m_pcMPMask;                             ///< Mask used for matching pursuit
 
   // -------------------------------------------------------------------------------------------------------------------
   // neighbour access variables
@@ -346,6 +347,8 @@ public:
   Bool          getIPCMFlag                   ( UInt uiIdx ) const                                         { return m_pbIPCMFlag[uiIdx];                }
   Void          setIPCMFlag                   ( UInt uiIdx, Bool b )                                       { m_pbIPCMFlag[uiIdx] = b;                   }
   Void          setIPCMFlagSubParts           ( Bool bIpcmFlag, UInt uiAbsPartIdx, UInt uiDepth );
+  Pel*          getMPMask                     ( )                                                          { return m_pcMPMask;                         }
+  Void          setMPMask                     ( Pel* mask )                                                { m_pcMPMask = mask;                         }
 
   // -------------------------------------------------------------------------------------------------------------------
   // member functions for accessing partition information

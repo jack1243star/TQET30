@@ -87,6 +87,7 @@ TComDataCU::TComDataCU()
   m_ArlCoeffIsAliasedAllocation = false;
 #endif
   m_pbIPCMFlag         = NULL;
+  m_pcMPMask           = NULL;
 
   m_pCtuAboveLeft      = NULL;
   m_pCtuAboveRight     = NULL;

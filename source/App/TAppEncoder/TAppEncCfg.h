@@ -135,6 +135,7 @@ protected:
   Bool      m_enableAMP;
   Bool      m_persistentRiceAdaptationEnabledFlag;            ///< control flag for Golomb-Rice parameter adaptation over each slice
   Bool      m_cabacBypassAlignmentEnabledFlag;
+  Bool      m_useMatchingPursuit;                             ///< use matching pursuit for screen content coding
 
   // coding quality
   Double    m_fQP;                                            ///< QP value of key-picture (floating point)

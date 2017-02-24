@@ -231,6 +231,7 @@ Void TAppEncTop::xInitLibCfg()
   m_cTEncTop.setUseBLambdaForNonKeyLowDelayPictures               ( m_bUseBLambdaForNonKeyLowDelayPictures );
   m_cTEncTop.setPCMLog2MinSize                                    ( m_uiPCMLog2MinSize);
   m_cTEncTop.setUsePCM                                            ( m_usePCM );
+  m_cTEncTop.setUseMatchingPursuit                                ( m_useMatchingPursuit );
 
   // set internal bit-depth and constants
   for (UInt channelType = 0; channelType < MAX_NUM_CHANNEL_TYPE; channelType++)

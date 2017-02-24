@@ -74,6 +74,7 @@ Void TEncCu::create(UChar uhTotalDepth, UInt uiMaxWidth, UInt uiMaxHeight, Chrom
   m_ppcResiYuvTemp = new TComYuv*[m_uhTotalDepth-1];
   m_ppcRecoYuvTemp = new TComYuv*[m_uhTotalDepth-1];
   m_ppcOrigYuv     = new TComYuv*[m_uhTotalDepth-1];
+  m_ppcMPMask      = new Pel*[m_uhTotalDepth - 1];
 
   UInt uiNumPartitions;
   for( i=0 ; i<m_uhTotalDepth-1 ; i++)
@@ -94,6 +95,7 @@ Void TEncCu::create(UChar uhTotalDepth, UInt uiMaxWidth, UInt uiMaxHeight, Chrom
     m_ppcRecoYuvTemp[i] = new TComYuv; m_ppcRecoYuvTemp[i]->create(uiWidth, uiHeight, chromaFormat);
 
     m_ppcOrigYuv    [i] = new TComYuv; m_ppcOrigYuv    [i]->create(uiWidth, uiHeight, chromaFormat);
+    m_ppcMPMask[i]      = new Pel[uiMaxWidth*uiMaxHeight];
   }
 
   m_bEncodeDQP                     = false;
@@ -152,6 +154,10 @@ Void TEncCu::destroy()
     {
       m_ppcOrigYuv[i]->destroy();     delete m_ppcOrigYuv[i];     m_ppcOrigYuv[i] = NULL;
     }
+    if (m_ppcMPMask[i])
+    {
+                                      delete m_ppcMPMask[i];      m_ppcMPMask[i] = NULL;
+    }
   }
   if(m_ppcBestCU)
   {
@@ -198,6 +204,11 @@ Void TEncCu::destroy()
   {
     delete [] m_ppcOrigYuv;
     m_ppcOrigYuv = NULL;
+  }
+  if (m_ppcMPMask)
+  {
+    delete [] m_ppcMPMask;
+    m_ppcMPMask = NULL;
   }
 }
 
@@ -457,6 +468,43 @@ Void TEncCu::xCompressCU( TComDataCU*& rpcBestCU, TComDataCU*& rpcTempCU, const 
   const UInt uiTPelY   = rpcBestCU->getCUPelY();
   const UInt uiBPelY   = uiTPelY + rpcBestCU->getHeight(0) - 1;
   const UInt uiWidth   = rpcBestCU->getWidth(0);
+
+  // create mask for matching pursuit
+  if ( m_pcEncCfg->getUseMatchingPursuit() )
+  {
+    const Pel* pixels = m_ppcOrigYuv[uiDepth]->getAddr(COMPONENT_Y, 0);
+    const UInt stride = m_ppcOrigYuv[uiDepth]->getStride(COMPONENT_Y);
+    const UInt length = stride * stride;
+    Double sum = 0.0;
+    Double avg = 0.0;
+
+    // calculate the average value for the block
+    for (UInt i=0; i<length; i++)
+    {
+      sum += *(pixels+i);
+    }
+    avg = sum / length;
+
+    // classify the pixels as dark or light
+    for (UInt i = 0; i<length; i++)
+    {
+      const UInt offsetX = i % uiWidth;
+      const UInt offsetY = i / uiWidth;
+      // calculate address of mask bit
+      Pel* maskbit = m_ppcMPMask[uiDepth] + uiLPelX + offsetX + (uiTPelY + offsetY) * 64;
+      if ( *(pixels + i) > avg )
+      {
+        *maskbit = -1;
+      }
+      else
+      {
+        *maskbit = 0;
+      }
+    }
+
+    rpcTempCU->setMPMask(m_ppcMPMask[uiDepth]);
+    rpcBestCU->setMPMask(m_ppcMPMask[uiDepth]);
+  }
 
   Int iBaseQP = xComputeQP( rpcBestCU, uiDepth );
   Int iMinQP;
