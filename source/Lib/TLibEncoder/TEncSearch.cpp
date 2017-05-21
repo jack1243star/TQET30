@@ -1399,6 +1399,165 @@ Void TEncSearch::xIntraCodingTUBlock(       TComYuv*    pcOrgYuv,
 }
 
 
+Void TEncSearch::xIntraCodingTUBlockMasked( TComYuv*    pcOrgYuv,
+                                            TComYuv*    pcPredYuv,
+                                            TComTU&     rTu,
+                                            Bool&       isFlatBlock,
+                                            Distortion& ruiDist
+                                           )
+{
+  const TComRectangle &rect         = rTu.getRect(COMPONENT_Y);
+        TComDataCU    *pcCU         = rTu.getCU();
+  const UInt           uiAbsPartIdx = rTu.GetAbsPartIdxTU();
+
+  const UInt           uiWidth      = rect.width;
+  const UInt           uiHeight     = rect.height;
+  const UInt           uiStride     = pcOrgYuv->getStride(COMPONENT_Y);
+        Pel           *piOrg        = pcOrgYuv->getAddr(COMPONENT_Y, uiAbsPartIdx);
+        //Pel           *piPred       = pcPredYuv->getAddr(COMPONENT_Y, uiAbsPartIdx);
+        Pel            piPred[64 * 64];
+        Pel            piResi[64 * 64];
+
+  // get mask
+  Pel *piMask = pcCU->getMPMask();
+
+  // check if we have a flat block
+  {
+    Pel* pMask = piMask;
+    pMask += rect.x0 + rect.y0 * 64;
+    Pel firstMaskPixel = pMask[0];
+    Bool bFlatBlock = true;
+
+    for (UInt i = 0; i < uiHeight; i++)
+    {
+      for (UInt j = 0; j < uiWidth; j++)
+      {
+        if (pMask[j] != firstMaskPixel)
+        {
+          bFlatBlock = false;
+        }
+      }
+      pMask += 64;
+    }
+
+    if (bFlatBlock)
+    {
+      // flat block, no need to proceed
+      isFlatBlock = true;
+      ruiDist = MAX_UINT;
+      return;
+    }
+  }
+
+  // get prediction
+  {
+    const TComSPS       &sps = *(pcCU->getSlice()->getSPS());
+    const ChannelType    chType = toChannelType(COMPONENT_Y);
+    const ChromaFormat   chFmt = pcOrgYuv->getChromaFormat();
+    const UInt           uiChPredMode = pcCU->getIntraDir(chType, uiAbsPartIdx);
+    const UInt           uiChFinalMode = uiChPredMode;
+    const Bool bUseFilteredPredictions = TComPrediction::filteringIntraReferenceSamples(COMPONENT_Y, uiChFinalMode, uiWidth, uiHeight, chFmt, sps.getSpsRangeExtension().getIntraSmoothingDisabledFlag());
+
+    initIntraPatternChType(rTu, COMPONENT_Y, bUseFilteredPredictions DEBUG_STRING_PASS_INTO(sDebug));
+    predIntraAng(COMPONENT_Y, uiChFinalMode, piOrg, uiStride, piPred, uiStride, rTu, bUseFilteredPredictions);
+  }
+
+  // get residual
+  {
+    Pel*  pOrg = piOrg;
+    Pel*  pPred = piPred;
+    Pel*  pResi = piResi;
+
+    for (UInt uiY = 0; uiY < uiHeight; uiY++)
+    {
+      for (UInt uiX = 0; uiX < uiWidth; uiX++)
+      {
+        pResi[uiX] = pOrg[uiX] - pPred[uiX];
+      }
+
+      pOrg += uiStride;
+      pResi += uiStride;
+      pPred += uiStride;
+    }
+  }
+
+  // matching pursuit and quantization
+  // reconstruct and calculate distortion
+
+  // dump the mask for debugging purposes
+  {
+    Pel*  pMask = piMask;
+    FILE* fp = fopen("D:/Temp/Programming/scratch-love/mask.txt", "wb");
+    // stride
+    fwrite(&uiStride, 1, 1, fp);
+    // width
+    fwrite(&uiWidth, 1, 1, fp);
+    // height
+    fwrite(&uiHeight, 1, 1, fp);
+
+    pMask += rect.x0 + rect.y0 * 64;
+    for (UInt i = 0; i < uiHeight; i++)
+    {
+      fwrite(pMask, sizeof(Pel), uiWidth, fp);
+      pMask += 64;
+    }
+    fclose(fp);
+  }
+
+  // dump the prediction for debugging purposes
+  {
+    Pel*  pPred = piPred;
+    FILE* fp = fopen("D:/Temp/Programming/scratch-love/pred.txt", "wb");
+    // stride
+    fwrite(&uiStride, 1, 1, fp);
+    // width
+    fwrite(&uiWidth, 1, 1, fp);
+    // height
+    fwrite(&uiHeight, 1, 1, fp);
+    for (UInt uiY = 0; uiY < uiHeight; uiY++)
+    {
+      fwrite(pPred, sizeof(Pel), uiWidth, fp);
+      pPred += uiStride;
+    }
+    fclose(fp);
+  }
+
+  // dump the image for debugging purposes
+  {
+    Pel*  pOrg = piOrg;
+    FILE* fp = fopen("D:/Temp/Programming/scratch-love/org.txt", "wb");
+    // stride
+    fwrite(&uiStride, 1, 1, fp);
+    // width
+    fwrite(&uiWidth, 1, 1, fp);
+    // height
+    fwrite(&uiHeight, 1, 1, fp);
+    for (UInt uiY = 0; uiY < uiHeight; uiY++)
+    {
+      fwrite(pOrg, sizeof(Pel), uiWidth, fp);
+      pOrg += uiStride;
+    }
+    fclose(fp);
+  }
+
+  // dump the residual for debugging purposes
+  {
+    Pel*  pResi = piResi;
+    FILE* fp = fopen("D:/Temp/Programming/scratch-love/resi.txt", "wb");
+    // stride
+    fwrite(&uiStride, 1, 1, fp);
+    // width
+    fwrite(&uiWidth, 1, 1, fp);
+    // height
+    fwrite(&uiHeight, 1, 1, fp);
+    for (UInt uiY = 0; uiY < uiHeight; uiY++)
+    {
+      fwrite(pResi, sizeof(Pel), uiWidth, fp);
+      pResi += uiStride;
+    }
+    fclose(fp);
+  }
+}
 
 
 Void
@@ -1603,6 +1762,20 @@ TEncSearch::xRecurIntraCodingLumaQT(TComYuv*    pcOrgYuv,
             xStoreCrossComponentPredictionResult(resiLuma[storedResidualIndex], resiLumaSingle[storedResidualIndex], rTu, xOffset, yOffset, MAX_CU_SIZE, MAX_CU_SIZE);
           }
         }
+      }
+    }
+    if ( m_pcEncCfg->getUseMatchingPursuit() )
+    {
+      Bool isFlatBlock;
+      Distortion uiMPDist; // the distortion using matching pursuit
+      xIntraCodingTUBlockMasked(pcOrgYuv, pcPredYuv, rTu, isFlatBlock, uiMPDist);
+
+      if (!isFlatBlock)
+      {
+        // check if using matching pursuit is better
+        // get used bits
+        UInt uiMPBits;
+        // TODO: clone xGetIntraBitsQT(rTu, true, false, false);
       }
     }
   }

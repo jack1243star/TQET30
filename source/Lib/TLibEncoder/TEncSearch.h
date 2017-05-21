@@ -249,6 +249,13 @@ protected:
                                          ,Int           default0Save1Load2 = 0
                                    );
 
+  Void TEncSearch::xIntraCodingTUBlockMasked( TComYuv*    pcOrgYuv,
+                                              TComYuv*    pcPredYuv,
+                                              TComTU&     rTu,
+                                              Bool&       isFlatBlock,
+                                              Distortion& ruiDist
+  );
+
   Void  xRecurIntraCodingLumaQT   ( TComYuv*    pcOrgYuv,
                                     TComYuv*    pcPredYuv,
                                     TComYuv*    pcResiYuv,

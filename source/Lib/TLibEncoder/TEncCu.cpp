@@ -95,7 +95,7 @@ Void TEncCu::create(UChar uhTotalDepth, UInt uiMaxWidth, UInt uiMaxHeight, Chrom
     m_ppcRecoYuvTemp[i] = new TComYuv; m_ppcRecoYuvTemp[i]->create(uiWidth, uiHeight, chromaFormat);
 
     m_ppcOrigYuv    [i] = new TComYuv; m_ppcOrigYuv    [i]->create(uiWidth, uiHeight, chromaFormat);
-    m_ppcMPMask[i]      = new Pel[uiMaxWidth*uiMaxHeight];
+    m_ppcMPMask     [i] = new Pel[uiMaxWidth*uiMaxHeight];
   }
 
   m_bEncodeDQP                     = false;
@@ -154,7 +154,7 @@ Void TEncCu::destroy()
     {
       m_ppcOrigYuv[i]->destroy();     delete m_ppcOrigYuv[i];     m_ppcOrigYuv[i] = NULL;
     }
-    if (m_ppcMPMask[i])
+    if(m_ppcMPMask[i])
     {
                                       delete m_ppcMPMask[i];      m_ppcMPMask[i] = NULL;
     }
@@ -458,6 +458,7 @@ Void TEncCu::xCompressCU( TComDataCU*& rpcBestCU, TComDataCU*& rpcTempCU, const 
 
   // get Original YUV data from picture
   m_ppcOrigYuv[uiDepth]->copyFromPicYuv( pcPic->getPicYuvOrg(), rpcBestCU->getCtuRsAddr(), rpcBestCU->getZorderIdxInCtu() );
+  UInt ctuRsAddr = rpcBestCU->getCtuRsAddr();
 
   // variable for Cbf fast mode PU decision
   Bool    doNotBlockPu = true;
@@ -503,7 +504,15 @@ Void TEncCu::xCompressCU( TComDataCU*& rpcBestCU, TComDataCU*& rpcTempCU, const 
     }
 
     rpcTempCU->setMPMask(m_ppcMPMask[uiDepth]);
-    rpcBestCU->setMPMask(m_ppcMPMask[uiDepth]);
+
+  //  // dump the mask for debugging purposes
+  //  void* buffer = (void*)(rpcBestCU->getMPMask());
+  //  size_t file_stride = 64;
+
+  //  FILE* fp = fopen("D:/Temp/Programming/scratch-love/data.txt", "wb");
+  //  fwrite(&file_stride, 1, 1, fp);
+  //  fwrite(buffer, 1, file_stride*file_stride * 2, fp);
+  //  fclose(fp);
   }
 
   Int iBaseQP = xComputeQP( rpcBestCU, uiDepth );
