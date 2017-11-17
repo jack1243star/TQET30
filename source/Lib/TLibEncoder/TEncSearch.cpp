@@ -44,6 +44,9 @@
 #include <math.h>
 #include <limits>
 
+#define CHY_MATCHING_PURSUIT_IMPLEMENTATION
+#include "matching_pursuit.h"
+
 
 //! \ingroup TLibEncoder
 //! \{
@@ -199,6 +202,7 @@ Void TEncSearch::destroy()
   m_pcQTTempTransformSkipTComYuv.destroy();
 
   m_tmpYuvPred.destroy();
+  chymp_free();
   m_isInitialized = false;
 }
 
@@ -304,6 +308,7 @@ Void TEncSearch::init(TEncCfg*       pcEncCfg,
   }
   m_pcQTTempTransformSkipTComYuv.create( maxCUWidth, maxCUHeight, pcEncCfg->getChromaFormatIdc() );
   m_tmpYuvPred.create(MAX_CU_SIZE, MAX_CU_SIZE, pcEncCfg->getChromaFormatIdc());
+  chymp_init();
   m_isInitialized = true;
 }
 
@@ -2230,6 +2235,10 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
   TComTURecurse tuRecurseCU(pcCU, 0);
   TComTURecurse tuRecurseWithPU(tuRecurseCU, false, (uiInitTrDepth==0)?TComTU::DONT_SPLIT : TComTU::QUAD_SPLIT);
 
+  bool mpDone = false;
+  double mpCost = 0;
+  double nonMpCost = 0;
+
   do
   {
     const UInt uiPartOffset=tuRecurseWithPU.GetAbsPartIdxTU();
@@ -2326,6 +2335,226 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
         uiRdModeList[i] = i;
       }
     }
+
+    // Matching pursuit
+    if (tuRecurseWithPU.getRect(COMPONENT_Y).width <= 32)
+    {
+      const TComRectangle &puRect = tuRecurseWithPU.getRect(COMPONENT_Y);
+      const UInt uiAbsPartIdx = tuRecurseWithPU.GetAbsPartIdxTU();
+
+      Pel* piOrg = pcOrgYuv->getAddr(COMPONENT_Y, uiAbsPartIdx);
+      Pel* piPred = pcPredYuv->getAddr(COMPONENT_Y, uiAbsPartIdx);
+      UInt uiStride = pcPredYuv->getStride(COMPONENT_Y);
+
+      Pel mask[32 * 32];
+      Pel mask2[32 * 32];// Inverted mask
+      TCoeff resi[32 * 32];
+      TCoeff darkCoeff[32 * 32];
+      TCoeff darkReco[32 * 32];
+      TCoeff brightCoeff[32 * 32];
+      TCoeff brightReco[32 * 32];
+      TCoeff reco[32 * 32];
+      Bool flatBlock = true;
+      UInt brightBits, darkBits, maskBits, totalBits;
+      Distortion totalDist;
+      double bestModeCost = MAX_DOUBLE;
+      char logmsg[512];
+
+      // Create mask for matching pursuit
+      chymp_mask(piOrg, puRect.width, puRect.height, uiStride, mask);
+      for (UInt i = 1; i < puRect.width*puRect.height; i++)
+      {
+        if (mask[i - 1] != mask[i])
+        {
+          // Not flat
+          flatBlock = false;
+          break;
+        }
+      }
+      // Inverted mask
+      for (UInt i = 0; i < puRect.width*puRect.height; i++)
+      {
+        mask2[i] = -(mask[i] - 1);
+      }
+//#define MPLOG
+#ifdef MPLOG
+      chymp_dump(piOrg, puRect.width, puRect.height, uiStride, "D:\\Temp\\Programming\\love-visualize\\org.lua");
+      chymp_dump(mask, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\mask.lua");
+#endif
+
+      if (flatBlock)
+      {
+        // Flat block, skip matching pursuit
+      }
+      else
+      {
+        // Prediction for dark and bright block
+        for (Int modeIdx = 0; modeIdx < numModesAvailable; modeIdx++)
+        {
+          UInt       uiMode = modeIdx;
+          Distortion uiSad = 0;
+          double totalCost;
+
+          predIntraAng(COMPONENT_Y, uiMode, piOrg, uiStride, piPred, uiStride, tuRecurseWithPU, false, false);
+#ifdef MPLOG
+          chymp_dump(piPred, puRect.width, puRect.height, uiStride, "D:\\Temp\\Programming\\love-visualize\\pred.lua");
+#endif
+
+          // Get prediction error
+          {
+            Pel *orig_ptr = piOrg;
+            Pel *pred_ptr = piPred;
+            for (UInt i = 0; i < puRect.height; i++)
+            {
+              for (UInt j = 0; j < puRect.width; j++)
+              {
+                resi[j + i * puRect.width] = pred_ptr[j] - orig_ptr[j];
+              }
+              pred_ptr += uiStride;
+              orig_ptr += uiStride;
+            }
+          }
+
+          // Get coefficients
+          // ep should adapt to block size
+          double ep = puRect.width * puRect.height;
+          double e_b = chymp_matching_pursuit(puRect.width, resi, mask, ep, brightCoeff, brightReco);
+          double e_d = chymp_matching_pursuit(puRect.width, resi, mask2, ep, darkCoeff, darkReco);
+#ifdef MPLOG
+          chymp_dump2(resi, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\resi.lua");
+#endif
+
+          // Get bits for bright block
+          {
+            // Check number of significant coefficients
+            Int count = 0;
+            for (Int i = 0; i < puRect.width * puRect.height; i++)
+            {
+              count += brightCoeff[i] != 0;
+            }
+            if (count == 0)
+            {
+              // There is no coefficient to encode, cost is 1 bit for the flag
+              brightBits = 1;
+            }
+            else
+            {
+              // Encode the coefficients
+              m_pcRDGoOnSbacCoder->load(m_pppcRDSbacCoder[uiDepth][CI_CURR_BEST]);
+              UInt before = m_pcEntropyCoder->getNumberOfWrittenBits();
+              m_pcEntropyCoder->m_pcEntropyCoderIf->codeCoeffNxN(tuRecurseWithPU, brightCoeff, COMPONENT_Y);
+              UInt after = m_pcEntropyCoder->getNumberOfWrittenBits();
+              m_pcRDGoOnSbacCoder->load(m_pppcRDSbacCoder[uiDepth][CI_CURR_BEST]);
+
+              assert(after - before > 0);
+
+              // One bit for empty coefficient flag
+              brightBits = 1 + after - before;
+            }
+          }
+
+          // Get bits for dark block
+          {
+            // Check number of significant coefficients
+            Int count = 0;
+            for (Int i = 0; i < puRect.width * puRect.height; i++)
+            {
+              count += darkCoeff[i] != 0;
+            }
+            if (count == 0)
+            {
+              // There is no coefficient to encode, cost is 1 bit for the flag
+              darkBits = 1;
+            }
+            else
+            {
+              // Encode the coefficients
+              m_pcRDGoOnSbacCoder->load(m_pppcRDSbacCoder[uiDepth][CI_CURR_BEST]);
+              UInt before = m_pcEntropyCoder->getNumberOfWrittenBits();
+              m_pcEntropyCoder->m_pcEntropyCoderIf->codeCoeffNxN(tuRecurseWithPU, darkCoeff, COMPONENT_Y);
+              UInt after = m_pcEntropyCoder->getNumberOfWrittenBits();
+              m_pcRDGoOnSbacCoder->load(m_pppcRDSbacCoder[uiDepth][CI_CURR_BEST]);
+
+              assert(after - before > 0);
+
+              // One bit for empty coefficient flag
+              darkBits = 1 + after - before;
+            }
+          }
+
+#ifdef MPLOG
+          chymp_dump2(brightReco, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\breco.lua");
+          chymp_dump2(darkReco, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\dreco.lua");
+#endif
+
+          // TODO: Code the mask block
+          {
+            maskBits = puRect.width * puRect.height;
+          }
+
+          // Calculate total error
+          {
+            // Combine the blocks to get reconstructed residue, notice that mask is inverted now
+            for (Int i = 0; i < puRect.width * puRect.height; i++)
+            {
+              reco[i] = mask[i] ? brightReco[i] : darkReco[i];
+            }
+            // Get reconstructed image
+            Pel *pred_ptr = piPred;
+            for (UInt i = 0; i < puRect.height; i++)
+            {
+              for (UInt j = 0; j < puRect.width; j++)
+              {
+                reco[j + i * puRect.width] = pred_ptr[j] - reco[j + i * puRect.width];
+              }
+              pred_ptr += uiStride;
+            }
+            // Calculate sum of squared error
+            totalDist = 0;
+            Pel *orig_ptr = piOrg;
+            for (UInt i = 0; i < puRect.height; i++)
+            {
+              for (UInt j = 0; j < puRect.width; j++)
+              {
+                int diff = reco[j + i * puRect.width] - orig_ptr[j];
+                totalDist += diff * diff;
+              }
+              orig_ptr += uiStride;
+            }
+#ifdef MPLOG
+            chymp_dump2(reco, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\reco.lua");
+#endif
+          }
+          // Calculate total cost
+          {
+            UInt iModeBits = 0;
+            iModeBits += xModeBitsIntra(pcCU, uiMode, uiPartOffset, uiDepth, CHANNEL_TYPE_LUMA);
+
+            // One bit for mixed block flag
+            totalBits = 1 + iModeBits + brightBits + darkBits + maskBits;
+
+            totalCost = m_pcRdCost->calcRdCost(totalBits, totalDist);
+          }
+
+          const UInt uiLPelX = pcCU->getCUPelX();
+          const UInt uiRPelX = uiLPelX + pcCU->getWidth(0) - 1;
+          const UInt uiTPelY = pcCU->getCUPelY();
+          const UInt uiBPelY = uiTPelY + pcCU->getHeight(0) - 1;
+          //const UInt uiWidth = pcCU->getWidth(0);
+          sprintf(
+            logmsg,
+            "{w=%3u, h=%3u, x=%3u, y=%3u, L=%3u, R=%3u, T=%3u, B=%3u, bits=%5u, dist=%10u, cost=%8.3f}",
+            puRect.width, puRect.height, puRect.x0, puRect.y0,
+            uiLPelX, uiRPelX, uiTPelY, uiBPelY,
+            totalBits, totalDist, totalCost
+          );
+          chymp_log(logmsg);
+          if (totalCost < bestModeCost) bestModeCost = totalCost;
+        } // mode loop
+        mpCost = bestModeCost;
+        mpDone = true;
+      } // if (flatBlock)
+    } // Matching pursuit
 
     //===== check modes (using r-d costs) =====
 #if HHI_RQT_INTRA_SPEEDUP_MOD
@@ -2526,7 +2755,17 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
 
     //=== update PU data ====
     pcCU->setIntraDirSubParts     ( CHANNEL_TYPE_LUMA, uiBestPUMode, uiPartOffset, uiDepth + uiInitTrDepth );
+
+    nonMpCost += dBestPUCost;
   } while (tuRecurseWithPU.nextSection(tuRecurseCU));
+
+  char logmsg[256];
+  sprintf(
+    logmsg,
+    "{mpCost = %f, nonMpCost = %f}", mpCost, nonMpCost
+  );
+  if (mpDone)
+    chymp_log(logmsg);
 
 
   if( uiNumPU > 1 )
