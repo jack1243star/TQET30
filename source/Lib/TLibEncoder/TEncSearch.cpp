@@ -2337,6 +2337,7 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
     }
 
     // Matching pursuit
+    mpDone = false;
     if (tuRecurseWithPU.getRect(COMPONENT_Y).width <= 32)
     {
       const TComRectangle &puRect = tuRecurseWithPU.getRect(COMPONENT_Y);
@@ -2355,9 +2356,12 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
       TCoeff brightReco[32 * 32];
       TCoeff reco[32 * 32];
       Bool flatBlock = true;
-      UInt brightBits, darkBits, maskBits, totalBits;
-      Distortion totalDist;
-      double bestModeCost = MAX_DOUBLE;
+      UInt brightBits, darkBits, maskBits;
+      UInt bestDarkBits, bestBrightBits;
+      Distortion brightDist, darkDist, bestBrightDist, bestDarkDist;
+      Int bestBrightMode, bestDarkMode;
+      double bestBrightCost = MAX_DOUBLE;
+      double bestDarkCost = MAX_DOUBLE;
       char logmsg[512];
 
       // Create mask for matching pursuit
@@ -2388,12 +2392,11 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
       }
       else
       {
-        // Prediction for dark and bright block
+        // Find best modes for bright and dark blocks
         for (Int modeIdx = 0; modeIdx < numModesAvailable; modeIdx++)
         {
           UInt       uiMode = modeIdx;
           Distortion uiSad = 0;
-          double totalCost;
 
           predIntraAng(COMPONENT_Y, uiMode, piOrg, uiStride, piPred, uiStride, tuRecurseWithPU, false, false);
 #ifdef MPLOG
@@ -2487,14 +2490,9 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
           chymp_dump2(darkReco, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\dreco.lua");
 #endif
 
-          // TODO: Code the mask block
-          {
-            maskBits = puRect.width * puRect.height;
-          }
-
           // Calculate total error
           {
-            // Combine the blocks to get reconstructed residue, notice that mask is inverted now
+            // Combine the blocks to get reconstructed residue
             for (Int i = 0; i < puRect.width * puRect.height; i++)
             {
               reco[i] = mask[i] ? brightReco[i] : darkReco[i];
@@ -2510,14 +2508,22 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
               pred_ptr += uiStride;
             }
             // Calculate sum of squared error
-            totalDist = 0;
+            brightDist = 0;
+            darkDist = 0;
             Pel *orig_ptr = piOrg;
             for (UInt i = 0; i < puRect.height; i++)
             {
               for (UInt j = 0; j < puRect.width; j++)
               {
                 int diff = reco[j + i * puRect.width] - orig_ptr[j];
-                totalDist += diff * diff;
+                if (mask[j + i * puRect.width] == 1)
+                {
+                  brightDist += diff * diff;
+                }
+                else
+                {
+                  darkDist += diff * diff;
+                }
               }
               orig_ptr += uiStride;
             }
@@ -2525,34 +2531,64 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
             chymp_dump2(reco, puRect.width, puRect.height, puRect.width, "D:\\Temp\\Programming\\love-visualize\\reco.lua");
 #endif
           }
-          // Calculate total cost
+
+          // TODO: Code the mask block
+          {
+            maskBits = puRect.width * puRect.height;
+          }
+
+          // Calculate cost
           {
             UInt iModeBits = 0;
             iModeBits += xModeBitsIntra(pcCU, uiMode, uiPartOffset, uiDepth, CHANNEL_TYPE_LUMA);
 
-            // One bit for mixed block flag
-            totalBits = 1 + iModeBits + brightBits + darkBits + maskBits;
+            // Include mode bits for each block
+            darkBits += iModeBits;
+            brightBits += iModeBits;
 
-            totalCost = m_pcRdCost->calcRdCost(totalBits, totalDist);
+            double darkCost = m_pcRdCost->calcRdCost(darkBits, darkDist);
+            double brightCost = m_pcRdCost->calcRdCost(brightBits, brightDist);
+
+            if (darkCost < bestDarkCost)
+            {
+              bestDarkCost = darkCost;
+              bestDarkMode = uiMode;
+              bestDarkBits = darkBits;
+              bestDarkDist = darkDist;
+            }
+            if (brightCost < bestBrightCost)
+            {
+              bestBrightCost = brightCost;
+              bestBrightMode = uiMode;
+              bestBrightBits = brightBits;
+              bestBrightDist = brightDist;
+            }
           }
+        } // mode loop
+
+        // Best mode for bright and dark modes found
+        {
+          // One bit for mixed block flag
+          UInt totalBits = 1 + bestBrightBits + bestDarkBits + maskBits;
+          double totalDist = bestBrightDist + bestDarkDist;
+          double totalCost = m_pcRdCost->calcRdCost(totalBits, totalDist);
 
           const UInt uiLPelX = pcCU->getCUPelX();
           const UInt uiRPelX = uiLPelX + pcCU->getWidth(0) - 1;
           const UInt uiTPelY = pcCU->getCUPelY();
           const UInt uiBPelY = uiTPelY + pcCU->getHeight(0) - 1;
-          //const UInt uiWidth = pcCU->getWidth(0);
           sprintf(
             logmsg,
-            "{w=%3u, h=%3u, x=%3u, y=%3u, L=%3u, R=%3u, T=%3u, B=%3u, bits=%5u, dist=%10u, cost=%8.3f}",
+            "{w=%3u, h=%3u, x=%3u, y=%3u, L=%3u, R=%3u, T=%3u, B=%3u, bits=%5u, dist=%10u, cost=%8.3f, bMode=%2d, dMode=%2d}",
             puRect.width, puRect.height, puRect.x0, puRect.y0,
             uiLPelX, uiRPelX, uiTPelY, uiBPelY,
-            totalBits, totalDist, totalCost
+            totalBits, bestBrightDist+bestDarkDist, totalCost, bestBrightMode, bestDarkMode
           );
           chymp_log(logmsg);
-          if (totalCost < bestModeCost) bestModeCost = totalCost;
-        } // mode loop
-        mpCost = bestModeCost;
-        mpDone = true;
+
+          mpCost = totalCost;
+          mpDone = true;
+        }
       } // if (flatBlock)
     } // Matching pursuit
 
@@ -2757,15 +2793,14 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
     pcCU->setIntraDirSubParts     ( CHANNEL_TYPE_LUMA, uiBestPUMode, uiPartOffset, uiDepth + uiInitTrDepth );
 
     nonMpCost += dBestPUCost;
+    char logmsg[256];
+    sprintf(
+      logmsg,
+      "{mpCost = %f, nonMpCost = %f}", mpCost, nonMpCost
+    );
+    if (mpDone)
+      chymp_log(logmsg);
   } while (tuRecurseWithPU.nextSection(tuRecurseCU));
-
-  char logmsg[256];
-  sprintf(
-    logmsg,
-    "{mpCost = %f, nonMpCost = %f}", mpCost, nonMpCost
-  );
-  if (mpDone)
-    chymp_log(logmsg);
 
 
   if( uiNumPU > 1 )
