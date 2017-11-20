@@ -28,11 +28,14 @@ extern "C" {
                                         double ep,
                                         TCoeff *coeff,
                                         TCoeff *rec);
-  CHYMP_DEF void chymp_init(void);
+  CHYMP_DEF void chymp_init();
   CHYMP_DEF void chymp_free(void);
   CHYMP_DEF void chymp_mask(Pel *pixels, UInt width, UInt height, UInt stride, Pel *mask);
   CHYMP_DEF void chymp_dump(Pel *src, UInt width, UInt height, UInt stride, char *filename);
   CHYMP_DEF void chymp_dump2(TCoeff *src, UInt width, UInt height, UInt stride, char *filename);
+  CHYMP_DEF void chymp_dumpP2(const Pel *src, UInt width, UInt height, UInt stride, char *filename);
+  CHYMP_DEF void chymp_dumpP22(TCoeff *src, UInt width, UInt height, UInt stride, char *filename);
+  CHYMP_DEF void chymp_copy(TCoeff *src, UInt width, UInt height, UInt stride, UInt left, UInt top);
   CHYMP_DEF void chymp_log(char *log);
 
 #ifdef __cplusplus
@@ -53,6 +56,9 @@ static TCoeff *basis8 = NULL;
 static TCoeff *basis16 = NULL;
 static TCoeff *basis32 = NULL;
 static FILE *logfile = NULL;
+static Pel *reco = NULL;
+static int global_width;
+static int global_height;
 
 static void chymp__dct(TCoeff *input, TCoeff *output, int width, int height)
 {
@@ -81,8 +87,10 @@ static void chymp__create_basis(int size, TCoeff *block)
   }
 }
 
-CHYMP_DEF void chymp_init(void)
+CHYMP_DEF void chymp_init()
 {
+  global_width = 1024;
+  global_height = 768;
   basis4 = (TCoeff *)malloc(4 * 4 * 4 * 4 * sizeof(TCoeff));
   basis8 = (TCoeff *)malloc(8 * 8 * 8 * 8 * sizeof(TCoeff));
   basis16 = (TCoeff *)malloc(16 * 16 * 16 * 16 * sizeof(TCoeff));
@@ -92,6 +100,7 @@ CHYMP_DEF void chymp_init(void)
   chymp__create_basis(16, basis16);
   chymp__create_basis(32, basis32);
   logfile = fopen("D:\\Temp\\Thesis\\Project\\mp_log.txt", "w");
+  reco = (Pel*)calloc(global_width*global_height, sizeof(Pel));
 }
 
 CHYMP_DEF void chymp_free(void)
@@ -101,6 +110,8 @@ CHYMP_DEF void chymp_free(void)
   free(basis16);
   free(basis32);
   fclose(logfile);
+  chymp_dumpP2(reco, global_width, global_height, global_width, "D:\\Temp\\Thesis\\Project\\mp_rec.pgm");
+  free(reco);
 }
 
 CHYMP_DEF void chymp_mask(Pel *pixels, UInt width, UInt height, UInt stride, Pel *mask)
@@ -308,6 +319,54 @@ CHYMP_DEF void chymp_dump2(TCoeff *src, UInt width, UInt height, UInt stride, ch
   fprintf(f, "}\n");
   fprintf(f, "}\n");
   fclose(f);
+}
+
+CHYMP_DEF void chymp_dumpP2(const Pel *src, UInt width, UInt height, UInt stride, char *filename)
+{
+  unsigned int i, j;
+  FILE* f = fopen(filename, "w");
+  fprintf(f, "P2\n");
+  fprintf(f, "%d %d\n", width, height);
+  fprintf(f, "255\n");
+  for (i = 0; i < height; i++)
+  {
+    for (j = 0; j < width; j++)
+    {
+      fprintf(f, "%d ", src[i*stride + j]);
+    }
+    fprintf(f, "\n");
+  }
+  fclose(f);
+}
+
+CHYMP_DEF void chymp_dumpP22(TCoeff *src, UInt width, UInt height, UInt stride, char *filename)
+{
+  unsigned int i, j;
+  FILE* f = fopen(filename, "w");
+  fprintf(f, "P2\n");
+  fprintf(f, "%d %d\n", width, height);
+  fprintf(f, "255\n");
+  for (i = 0; i < height; i++)
+  {
+    for (j = 0; j < width; j++)
+    {
+      fprintf(f, "%d ", src[i*stride + j]);
+    }
+    fprintf(f, "\n");
+  }
+  fclose(f);
+}
+
+CHYMP_DEF void chymp_copy(TCoeff *src, UInt width, UInt height, UInt stride, UInt left, UInt top)
+{
+  unsigned int i, j;
+  for (i = 0; i < height; i++)
+  {
+    for (j = 0; j < width; j++)
+    {
+      reco[(i+top)*global_width+left+j] = src[i*stride + j];
+    }
+  }
 }
 
 CHYMP_DEF void chymp_log(char *log)

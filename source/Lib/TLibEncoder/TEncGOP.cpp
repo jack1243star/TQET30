@@ -51,6 +51,10 @@
 
 #include <deque>
 using namespace std;
+extern "C" {
+  void chymp_log(char*);
+  void chymp_dumpP2(const Pel *src, UInt width, UInt height, UInt stride, char *filename);
+}
 
 //! \ingroup TLibEncoder
 //! \{
@@ -2174,6 +2178,18 @@ Void TEncGOP::xCalculateAddPSNR( TComPic* pcPic, TComPicYuv* pcPicD, const Acces
     const Double fRefValue = (Double) maxval * maxval * iSize;
     dPSNR[ch]         = ( uiSSDtemp ? 10.0 * log10( fRefValue / (Double)uiSSDtemp ) : 999.99 );
     MSEyuvframe[ch]   = (Double)uiSSDtemp/(iSize);
+
+    char logmsg[256];
+    if(ch==COMPONENT_Y)
+    {
+      sprintf(
+        logmsg,
+        "{tag='summary', PSNR=%f, SSD=%llu, lambda=%f}", dPSNR[ch], uiSSDtemp, m_pcEncTop->getRdCost()->getLambda()
+      );
+      chymp_log(logmsg);
+      chymp_dumpP2(pOrgPicYuv->getAddr(ch), iWidth, iHeight, iOrgStride, "D:\\Temp\\Thesis\\Project\\org.pgm");
+      chymp_dumpP2(picd.getAddr(ch), iWidth, iHeight, iOrgStride, "D:\\Temp\\Thesis\\Project\\rec.pgm");
+    }
   }
 
 

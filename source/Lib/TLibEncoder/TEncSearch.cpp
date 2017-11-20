@@ -2338,7 +2338,7 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
 
     // Matching pursuit
     mpDone = false;
-    if (tuRecurseWithPU.getRect(COMPONENT_Y).width <= 32)
+    if (true && tuRecurseWithPU.getRect(COMPONENT_Y).width == 8)
     {
       const TComRectangle &puRect = tuRecurseWithPU.getRect(COMPONENT_Y);
       const UInt uiAbsPartIdx = tuRecurseWithPU.GetAbsPartIdxTU();
@@ -2355,6 +2355,7 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
       TCoeff brightCoeff[32 * 32];
       TCoeff brightReco[32 * 32];
       TCoeff reco[32 * 32];
+      TCoeff bestReco[32 * 32];
       Bool flatBlock = true;
       UInt brightBits, darkBits, maskBits;
       UInt bestDarkBits, bestBrightBits;
@@ -2396,7 +2397,6 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
         for (Int modeIdx = 0; modeIdx < numModesAvailable; modeIdx++)
         {
           UInt       uiMode = modeIdx;
-          Distortion uiSad = 0;
 
           predIntraAng(COMPONENT_Y, uiMode, piOrg, uiStride, piPred, uiStride, tuRecurseWithPU, false, false);
 #ifdef MPLOG
@@ -2555,6 +2555,14 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
               bestDarkMode = uiMode;
               bestDarkBits = darkBits;
               bestDarkDist = darkDist;
+              for (UInt i = 0; i < puRect.height; i++)
+              {
+                for (UInt j = 0; j < puRect.width; j++)
+                {
+                  if (mask2[j + i * puRect.width])
+                    bestReco[j + i * puRect.width] = reco[j + i * puRect.width];
+                }
+              }
             }
             if (brightCost < bestBrightCost)
             {
@@ -2562,6 +2570,14 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
               bestBrightMode = uiMode;
               bestBrightBits = brightBits;
               bestBrightDist = brightDist;
+              for (UInt i = 0; i < puRect.height; i++)
+              {
+                for (UInt j = 0; j < puRect.width; j++)
+                {
+                  if (mask[j + i * puRect.width])
+                    bestReco[j + i * puRect.width] = reco[j + i * puRect.width];
+                }
+              }
             }
           }
         } // mode loop
@@ -2570,7 +2586,7 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
         {
           // One bit for mixed block flag
           UInt totalBits = 1 + bestBrightBits + bestDarkBits + maskBits;
-          double totalDist = bestBrightDist + bestDarkDist;
+          Distortion totalDist = bestBrightDist + bestDarkDist;
           double totalCost = m_pcRdCost->calcRdCost(totalBits, totalDist);
 
           const UInt uiLPelX = pcCU->getCUPelX();
@@ -2579,12 +2595,13 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
           const UInt uiBPelY = uiTPelY + pcCU->getHeight(0) - 1;
           sprintf(
             logmsg,
-            "{w=%3u, h=%3u, x=%3u, y=%3u, L=%3u, R=%3u, T=%3u, B=%3u, bits=%5u, dist=%10u, cost=%8.3f, bMode=%2d, dMode=%2d}",
+            "{tag='PU', w=%3u, h=%3u, x=%3u, y=%3u, L=%3u, R=%3u, T=%3u, B=%3u, mpBits=%5u, mpDist=%10u, bMode=%2d, dMode=%2d,",
             puRect.width, puRect.height, puRect.x0, puRect.y0,
             uiLPelX, uiRPelX, uiTPelY, uiBPelY,
-            totalBits, bestBrightDist+bestDarkDist, totalCost, bestBrightMode, bestDarkMode
+            totalBits, totalDist, bestBrightMode, bestDarkMode
           );
           chymp_log(logmsg);
+          chymp_copy(bestReco, puRect.width, puRect.height, uiStride, uiLPelX, uiTPelY);
 
           mpCost = totalCost;
           mpDone = true;
@@ -2792,11 +2809,10 @@ TEncSearch::estIntraPredLumaQT(TComDataCU* pcCU,
     //=== update PU data ====
     pcCU->setIntraDirSubParts     ( CHANNEL_TYPE_LUMA, uiBestPUMode, uiPartOffset, uiDepth + uiInitTrDepth );
 
-    nonMpCost += dBestPUCost;
     char logmsg[256];
     sprintf(
       logmsg,
-      "{mpCost = %f, nonMpCost = %f}", mpCost, nonMpCost
+      "mpCost = %f, nonMpCost = %f, nonMpDist = %u},", mpCost, dBestPUCost, uiBestPUDistY
     );
     if (mpDone)
       chymp_log(logmsg);
